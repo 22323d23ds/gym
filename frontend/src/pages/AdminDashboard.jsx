@@ -103,6 +103,18 @@ const AdminDashboard = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [newDiscountCode, setNewDiscountCode] = useState({ code: '', discount_percent: 10, max_uses: 0 });
   
+  // NEW: Enhanced dashboard states
+  const [lowStockItems, setLowStockItems] = useState([]);
+  const [topCustomers, setTopCustomers] = useState([]);
+  const [customerStats, setCustomerStats] = useState(null);
+  const [geographicData, setGeographicData] = useState([]);
+  const [conversionFunnel, setConversionFunnel] = useState(null);
+  const [revenueAnalytics, setRevenueAnalytics] = useState(null);
+  const [promoPerformance, setPromoPerformance] = useState([]);
+  const [selectedOrders, setSelectedOrders] = useState([]);
+  const [reminderSubject, setReminderSubject] = useState('Your RAZE drop is coming soon!');
+  const [reminderMessage, setReminderMessage] = useState('The wait is almost over. Get ready for the drop!');
+  
   // Email form state
   const [emailForm, setEmailForm] = useState({
     subject: '',
