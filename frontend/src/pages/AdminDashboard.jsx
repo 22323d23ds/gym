@@ -1198,6 +1198,87 @@ const AdminDashboard = () => {
               </label>
             </div>
 
+            {/* NEW: Quick Actions Card */}
+            <div className="quick-actions-section">
+              <h3><Zap size={20} /> Quick Actions</h3>
+              <div className="quick-actions-grid">
+                <div className="quick-action-card">
+                  <Bell size={24} />
+                  <h4>Send Drop Reminder</h4>
+                  <p>Notify all waitlist subscribers</p>
+                  <input 
+                    type="text" 
+                    placeholder="Email subject..." 
+                    value={reminderSubject}
+                    onChange={(e) => setReminderSubject(e.target.value)}
+                    className="quick-action-input"
+                  />
+                  <button onClick={sendWaitlistReminder} className="quick-action-btn">
+                    <Send size={14} /> Send to Waitlist
+                  </button>
+                </div>
+                <div className="quick-action-card">
+                  <Truck size={24} />
+                  <h4>Bulk Ship Orders</h4>
+                  <p>Mark pending orders as shipped</p>
+                  <button 
+                    onClick={() => {
+                      setActiveTab('orders');
+                      setTimeout(() => selectAllOrders(), 500);
+                    }} 
+                    className="quick-action-btn"
+                  >
+                    <Package size={14} /> Go to Orders
+                  </button>
+                </div>
+                <div className="quick-action-card">
+                  <Award size={24} />
+                  <h4>View Top Customers</h4>
+                  <p>See your best customers</p>
+                  <button onClick={() => setActiveTab('customers')} className="quick-action-btn">
+                    <Crown size={14} /> View Leaderboard
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* NEW: Low Stock Alerts */}
+            {lowStockItems.length > 0 && (
+              <div className="low-stock-section">
+                <h3><AlertTriangle size={20} color="#f59e0b" /> Low Stock Alerts ({lowStockItems.length})</h3>
+                <div className="low-stock-grid">
+                  {lowStockItems.slice(0, 6).map((item, i) => (
+                    <div key={i} className={`low-stock-card ${item.is_critical ? 'critical' : ''}`}>
+                      <div className="low-stock-header">
+                        <span className="low-stock-product">{item.product_name}</span>
+                        {item.is_critical && <span className="critical-badge">CRITICAL</span>}
+                      </div>
+                      <div className="low-stock-details">
+                        <span className="low-stock-variant">{item.color} - {item.size}</span>
+                        <span className={`low-stock-qty ${item.quantity <= 3 ? 'danger' : item.quantity <= 5 ? 'warning' : ''}`}>
+                          {item.quantity} left
+                        </span>
+                      </div>
+                      <div className="low-stock-bar">
+                        <div 
+                          className={`low-stock-fill ${item.quantity <= 3 ? 'danger' : item.quantity <= 5 ? 'warning' : 'ok'}`}
+                          style={{ width: `${Math.min(item.quantity * 10, 100)}%` }}
+                        />
+                      </div>
+                      <button onClick={() => setActiveTab('inventory')} className="restock-btn">
+                        Restock
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {lowStockItems.length > 6 && (
+                  <button onClick={() => setActiveTab('inventory')} className="view-all-btn">
+                    View All {lowStockItems.length} Low Stock Items →
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Search & Filter Section */}
             <div className="search-filter-section">
               <h4><Search size={18} /> Search & Filter</h4>
