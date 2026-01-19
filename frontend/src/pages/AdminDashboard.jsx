@@ -2049,10 +2049,36 @@ const AdminDashboard = () => {
           <div className="admin-table-container">
             <div className="table-header">
               <h2>Inventory Management</h2>
-              <button onClick={loadInventory} className="refresh-btn">
-                <RefreshCw size={16} /> Refresh
-              </button>
+              <div className="header-actions">
+                {lowStockItems.length > 0 && (
+                  <span className="low-stock-alert">
+                    <AlertTriangle size={16} /> {lowStockItems.length} items low on stock
+                  </span>
+                )}
+                <button onClick={() => { loadInventory(); loadLowStockItems(); }} className="refresh-btn">
+                  <RefreshCw size={16} /> Refresh
+                </button>
+              </div>
             </div>
+            
+            {/* Low Stock Summary */}
+            {lowStockItems.length > 0 && (
+              <div className="inventory-alerts">
+                <h4><AlertTriangle size={18} color="#f59e0b" /> Low Stock Items ({lowStockItems.length})</h4>
+                <div className="alert-items-scroll">
+                  {lowStockItems.map((item, i) => (
+                    <div key={i} className={`alert-item ${item.is_critical ? 'critical' : ''}`}>
+                      <span className="alert-product">{item.product_name}</span>
+                      <span className="alert-variant">{item.color} - {item.size}</span>
+                      <span className={`alert-qty ${item.is_critical ? 'critical' : 'warning'}`}>
+                        {item.quantity} left
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
             <table className="admin-table">
               <thead>
                 <tr>
@@ -2060,6 +2086,9 @@ const AdminDashboard = () => {
                   <th>Color</th>
                   <th>Size</th>
                   <th>Quantity</th>
+                  <th>Reserved</th>
+                  <th>Available</th>
+                  <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -2078,15 +2107,144 @@ const AdminDashboard = () => {
                         min="0"
                       />
                     </td>
+                    <td>{item.reserved || 0}</td>
+                    <td>{(item.quantity || 0) - (item.reserved || 0)}</td>
                     <td>
-                      {item.quantity <= (item.low_stock_threshold || 5) && (
-                        <span className="low-stock-badge">Low Stock!</span>
+                      {item.quantity <= 3 ? (
+                        <span className="status-badge critical">Critical</span>
+                      ) : item.quantity <= (item.low_stock_threshold || 5) ? (
+                        <span className="status-badge warning">Low Stock</span>
+                      ) : (
+                        <span className="status-badge ok">In Stock</span>
                       )}
+                    </td>
+                    <td>
+                      <button className="action-btn-sm" onClick={() => updateInventory(item.product_id, item.size, (item.quantity || 0) + 10)}>
+                        +10
+                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Top Customers Tab */}
+        {activeTab === 'customers' && (
+          <div className="admin-customers-section">
+            <div className="table-header">
+              <h2><Crown size={24} /> Customer Insights</h2>
+              <button onClick={() => { loadTopCustomers(); loadGeographicData(); }} className="refresh-btn">
+                <RefreshCw size={16} /> Refresh
+              </button>
+            </div>
+
+            {/* Customer Stats */}
+            {customerStats && (
+              <div className="customer-stats-row">
+                <div className="customer-stat-card">
+                  <Users size={24} />
+                  <div>
+                    <h3>{customerStats.total_unique}</h3>
+                    <p>Total Customers</p>
+                  </div>
+                </div>
+                <div className="customer-stat-card repeat">
+                  <Star size={24} />
+                  <div>
+                    <h3>{customerStats.repeat_count}</h3>
+                    <p>Repeat Customers</p>
+                  </div>
+                </div>
+                <div className="customer-stat-card rate">
+                  <TrendingUp size={24} />
+                  <div>
+                    <h3>{customerStats.repeat_rate}%</h3>
+                    <p>Repeat Rate</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Top Customers Leaderboard */}
+            <div className="customers-section">
+              <h3><Award size={20} /> Top Customers Leaderboard</h3>
+              <div className="customers-table-scroll">
+                <table className="admin-table enhanced">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Customer</th>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Orders</th>
+                      <th>Total Spent</th>
+                      <th>Avg Order</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topCustomers.map((customer, i) => (
+                      <tr key={i} className={i < 3 ? 'top-customer' : ''}>
+                        <td>
+                          {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                        </td>
+                        <td className="email-cell">{customer.email}</td>
+                        <td>{customer.name || '-'}</td>
+                        <td>
+                          <span className={`discipline-badge ${(customer.gymnastics_type || 'unknown').toLowerCase()}`}>
+                            {customer.gymnastics_type || '-'}
+                          </span>
+                        </td>
+                        <td><strong>{customer.order_count}</strong></td>
+                        <td className="revenue">${customer.total_spent.toFixed(2)}</td>
+                        <td>${customer.avg_order_value.toFixed(2)}</td>
+                        <td>
+                          {customer.is_repeat_customer ? (
+                            <span className="status-badge vip">VIP</span>
+                          ) : (
+                            <span className="status-badge new">New</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {topCustomers.length === 0 && (
+                      <tr><td colSpan="8" className="empty-row">No customers yet</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Geographic Distribution */}
+            <div className="geographic-section">
+              <h3><Globe size={20} /> Geographic Distribution</h3>
+              <div className="geographic-grid">
+                {geographicData.slice(0, 12).map((country, i) => (
+                  <div key={i} className="country-card">
+                    <div className="country-header">
+                      <span className="country-flag">{country.country_code ? getCountryFlag(country.country_code) : '🌍'}</span>
+                      <span className="country-name">{country.country || 'Unknown'}</span>
+                    </div>
+                    <div className="country-stats">
+                      <div className="country-stat">
+                        <span className="stat-value">{country.visitors}</span>
+                        <span className="stat-label">Visitors</span>
+                      </div>
+                      <div className="country-stat">
+                        <span className="stat-value">{country.orders}</span>
+                        <span className="stat-label">Orders</span>
+                      </div>
+                      <div className="country-stat">
+                        <span className="stat-value">${country.revenue?.toFixed(0) || 0}</span>
+                        <span className="stat-label">Revenue</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
