@@ -679,6 +679,157 @@ const AdminDashboard = () => {
 
   // ============== END NEW FEATURE FUNCTIONS ==============
 
+  // ============== ENHANCED ADMIN FUNCTIONS ==============
+  
+  // Load low stock items
+  const loadLowStockItems = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/inventory/low-stock?threshold=10`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setLowStockItems(data.low_stock_items || []);
+    } catch (error) {
+      console.error('Failed to load low stock items:', error);
+    }
+  };
+
+  // Load top customers
+  const loadTopCustomers = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/customers/top?limit=20`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setTopCustomers(data.top_customers || []);
+      setCustomerStats({
+        total_unique: data.total_unique_customers,
+        repeat_count: data.repeat_customer_count,
+        repeat_rate: data.repeat_customer_rate
+      });
+    } catch (error) {
+      console.error('Failed to load top customers:', error);
+    }
+  };
+
+  // Load geographic data
+  const loadGeographicData = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/customers/geographic`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setGeographicData(data.countries || []);
+    } catch (error) {
+      console.error('Failed to load geographic data:', error);
+    }
+  };
+
+  // Load conversion funnel
+  const loadConversionFunnel = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/analytics/conversion-funnel?days=30`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setConversionFunnel(data);
+    } catch (error) {
+      console.error('Failed to load conversion funnel:', error);
+    }
+  };
+
+  // Load revenue analytics
+  const loadRevenueAnalytics = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/analytics/revenue?days=30`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setRevenueAnalytics(data);
+    } catch (error) {
+      console.error('Failed to load revenue analytics:', error);
+    }
+  };
+
+  // Load promo performance
+  const loadPromoPerformance = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/promo/performance`, {
+        credentials: 'include',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      setPromoPerformance(data.promo_performance || []);
+    } catch (error) {
+      console.error('Failed to load promo performance:', error);
+    }
+  };
+
+  // Bulk update order status
+  const bulkUpdateOrderStatus = async (status) => {
+    if (selectedOrders.length === 0) {
+      alert('Please select orders to update');
+      return;
+    }
+    if (!window.confirm(`Mark ${selectedOrders.length} orders as "${status}"?`)) return;
+    
+    try {
+      const res = await fetch(`${API_URL}/api/admin/orders/bulk-update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ order_ids: selectedOrders, status })
+      });
+      const data = await res.json();
+      alert(`Updated ${data.updated_count} orders to "${status}"`);
+      setSelectedOrders([]);
+      loadOrders();
+    } catch (error) {
+      console.error('Failed to bulk update orders:', error);
+    }
+  };
+
+  // Send waitlist reminder
+  const sendWaitlistReminder = async () => {
+    if (!window.confirm('Send reminder to all waitlist subscribers?')) return;
+    
+    try {
+      const res = await fetch(`${API_URL}/api/admin/waitlist/send-reminder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ subject: reminderSubject, message: reminderMessage })
+      });
+      const data = await res.json();
+      alert(data.message);
+    } catch (error) {
+      console.error('Failed to send reminder:', error);
+    }
+  };
+
+  // Toggle order selection
+  const toggleOrderSelection = (orderId) => {
+    setSelectedOrders(prev => 
+      prev.includes(orderId) 
+        ? prev.filter(id => id !== orderId)
+        : [...prev, orderId]
+    );
+  };
+
+  // Select all orders
+  const selectAllOrders = () => {
+    if (selectedOrders.length === orders.length) {
+      setSelectedOrders([]);
+    } else {
+      setSelectedOrders(orders.map(o => o.id));
+    }
+  };
+
+  // ============== END ENHANCED ADMIN FUNCTIONS ==============
+
   const deleteSubscriber = async (email) => {
     if (!window.confirm(`Delete subscriber ${email}?`)) return;
     
