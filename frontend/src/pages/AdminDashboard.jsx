@@ -916,15 +916,19 @@ const AdminDashboard = () => {
         break;
       case 'analytics':
         loadAnalytics();
+        loadConversionFunnel();
+        loadRevenueAnalytics();
         break;
       case 'inventory':
         loadInventory();
+        loadLowStockItems();
         break;
       case 'activity':
         loadActivityLog();
         break;
       case 'discounts':
         loadDiscountCodes();
+        loadPromoPerformance();
         break;
       case 'email-logs':
         loadEmailLogs();
@@ -932,8 +936,13 @@ const AdminDashboard = () => {
       case 'duplicates':
         loadDuplicates();
         break;
+      case 'customers':
+        loadTopCustomers();
+        loadGeographicData();
+        break;
       default:
         loadStats();
+        loadLowStockItems();
     }
   }, [activeTab, isAuthenticated]);
 
