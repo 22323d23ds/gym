@@ -1919,34 +1919,61 @@ const AdminDashboard = () => {
           <div className="admin-table-container">
             <div className="table-header">
               <h2>Orders ({orders.length})</h2>
-              <button onClick={loadOrders} className="refresh-btn">
-                <RefreshCw size={16} /> Refresh
-              </button>
+              <div className="header-actions">
+                {selectedOrders.length > 0 && (
+                  <>
+                    <button onClick={() => bulkUpdateOrderStatus('shipped')} className="action-btn ship">
+                      <Truck size={16} /> Mark as Shipped ({selectedOrders.length})
+                    </button>
+                    <button onClick={() => bulkUpdateOrderStatus('delivered')} className="action-btn deliver">
+                      <Check size={16} /> Mark Delivered
+                    </button>
+                    <button onClick={() => bulkUpdateOrderStatus('cancelled')} className="action-btn cancel">
+                      <X size={16} /> Cancel
+                    </button>
+                  </>
+                )}
+                <button onClick={loadOrders} className="refresh-btn">
+                  <RefreshCw size={16} /> Refresh
+                </button>
+              </div>
             </div>
-            <table className="admin-table">
+            <table className="admin-table enhanced">
               <thead>
                 <tr>
+                  <th>
+                    <button onClick={selectAllOrders} className="select-all-btn">
+                      {selectedOrders.length === orders.length ? <CheckSquare size={16} /> : <Square size={16} />}
+                    </button>
+                  </th>
                   <th>Order ID</th>
                   <th>Customer</th>
                   <th>Items</th>
                   <th>Total</th>
                   <th>Status</th>
+                  <th>Tracking</th>
                   <th>Date</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.map((order, i) => (
-                  <tr key={i}>
-                    <td className="order-id">{order.order_id?.slice(0, 12)}...</td>
+                  <tr key={i} className={selectedOrders.includes(order.id) ? 'selected' : ''}>
+                    <td>
+                      <button onClick={() => toggleOrderSelection(order.id)} className="select-btn">
+                        {selectedOrders.includes(order.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+                      </button>
+                    </td>
+                    <td className="order-id">{order.order_number || order.order_id?.slice(0, 12)}...</td>
                     <td>{order.shipping?.email || order.customer_email || '-'}</td>
                     <td>{order.items?.length || 0} items</td>
                     <td>${order.total?.toFixed(2) || '0.00'}</td>
                     <td><span className={`status-badge ${order.status}`}>{order.status}</span></td>
+                    <td>{order.tracking_number || '-'}</td>
                     <td>{new Date(order.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
                 {orders.length === 0 && (
-                  <tr><td colSpan="6" className="empty-row">No orders found</td></tr>
+                  <tr><td colSpan="8" className="empty-row">No orders found</td></tr>
                 )}
               </tbody>
             </table>
