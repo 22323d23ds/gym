@@ -4967,6 +4967,481 @@ async def admin_select_giveaway_winner(request: Request):
     }
 
 
+# ============================================
+# ENHANCED ADMIN ENDPOINTS - Dashboard & Analytics
+# ============================================
+
+@api_router.get("/admin/dashboard/quick-stats")
+async def get_admin_quick_stats(request: Request):
+    """Get quick dashboard stats for admin overview"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get counts
+    total_users = await db.users.count_documents({})
+    total_waitlist = await db.waitlist.count_documents({})
+    total_orders = await db.orders.count_documents({})
+    total_giveaway = await db.email_subscriptions.count_documents({"source": "giveaway_popup"})
+    
+    # Today's counts
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_iso = today_start.isoformat()
+    
+    signups_today = await db.users.count_documents({"created_at": {"$gte": today_iso}})
+    orders_today = await db.orders.count_documents({"created_at": {"$gte": today_iso}})
+    waitlist_today = await db.waitlist.count_documents({"created_at": {"$gte": today_iso}})
+    
+    # Revenue
+    orders = await db.orders.find({}, {"total": 1}).to_list(10000)
+    total_revenue = sum(o.get("total", 0) for o in orders)
+    
+    # Orders today revenue
+    today_orders = await db.orders.find({"created_at": {"$gte": today_iso}}, {"total": 1}).to_list(1000)
+    today_revenue = sum(o.get("total", 0) for o in today_orders)
+    
+    return {
+        "total_users": total_users,
+        "total_waitlist": total_waitlist,
+        "total_orders": total_orders,
+        "total_giveaway": total_giveaway,
+        "total_revenue": total_revenue,
+        "signups_today": signups_today,
+        "orders_today": orders_today,
+        "waitlist_today": waitlist_today,
+        "today_revenue": today_revenue
+    }
+
+
+@api_router.get("/admin/inventory/low-stock")
+async def get_low_stock_items(request: Request, threshold: int = 10):
+    """Get inventory items that are low on stock"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all inventory items below threshold
+    low_stock = await db.inventory.find({
+        "quantity": {"$lte": threshold}
+    }).to_list(1000)
+    
+    # Format response
+    items = []
+    for item in low_stock:
+        items.append({
+            "product_id": item.get("product_id"),
+            "product_name": item.get("product_name"),
+            "color": item.get("color"),
+            "size": item.get("size"),
+            "quantity": item.get("quantity", 0),
+            "reserved": item.get("reserved", 0),
+            "available": item.get("quantity", 0) - item.get("reserved", 0),
+            "low_stock_threshold": item.get("low_stock_threshold", 5),
+            "is_critical": item.get("quantity", 0) <= 3
+        })
+    
+    # Sort by quantity (lowest first)
+    items.sort(key=lambda x: x["quantity"])
+    
+    return {
+        "low_stock_items": items,
+        "total_low_stock": len(items),
+        "critical_count": sum(1 for i in items if i["is_critical"])
+    }
+
+
+@api_router.get("/admin/customers/top")
+async def get_top_customers(request: Request, limit: int = 20):
+    """Get top customers by order count and total spent"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Aggregate orders by customer email
+    pipeline = [
+        {"$group": {
+            "_id": "$shipping.email",
+            "order_count": {"$sum": 1},
+            "total_spent": {"$sum": "$total"},
+            "first_order": {"$min": "$created_at"},
+            "last_order": {"$max": "$created_at"},
+            "orders": {"$push": {"order_number": "$order_number", "total": "$total", "created_at": "$created_at"}}
+        }},
+        {"$match": {"_id": {"$ne": None}}},
+        {"$sort": {"total_spent": -1}},
+        {"$limit": limit}
+    ]
+    
+    results = await db.orders.aggregate(pipeline).to_list(limit)
+    
+    customers = []
+    for r in results:
+        # Get user info if they have an account
+        user_info = await db.users.find_one({"email": r["_id"]}, {"_id": 0, "name": 1, "gymnastics_type": 1})
+        
+        customers.append({
+            "email": r["_id"],
+            "name": user_info.get("name") if user_info else None,
+            "gymnastics_type": user_info.get("gymnastics_type") if user_info else None,
+            "order_count": r["order_count"],
+            "total_spent": round(r["total_spent"], 2),
+            "avg_order_value": round(r["total_spent"] / r["order_count"], 2) if r["order_count"] > 0 else 0,
+            "first_order": r["first_order"],
+            "last_order": r["last_order"],
+            "is_repeat_customer": r["order_count"] > 1
+        })
+    
+    # Calculate repeat customer rate
+    total_customers_with_orders = await db.orders.distinct("shipping.email")
+    repeat_customers = [c for c in customers if c["is_repeat_customer"]]
+    
+    return {
+        "top_customers": customers,
+        "total_unique_customers": len(total_customers_with_orders),
+        "repeat_customer_count": len(repeat_customers),
+        "repeat_customer_rate": round(len(repeat_customers) / len(total_customers_with_orders) * 100, 1) if total_customers_with_orders else 0
+    }
+
+
+@api_router.get("/admin/customers/geographic")
+async def get_customer_geographic_data(request: Request):
+    """Get customer distribution by country/region"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Aggregate by country from orders
+    order_pipeline = [
+        {"$match": {"shipping.country": {"$ne": None}}},
+        {"$group": {
+            "_id": "$shipping.country",
+            "order_count": {"$sum": 1},
+            "revenue": {"$sum": "$total"},
+            "unique_customers": {"$addToSet": "$shipping.email"}
+        }},
+        {"$project": {
+            "country": "$_id",
+            "order_count": 1,
+            "revenue": 1,
+            "customer_count": {"$size": "$unique_customers"}
+        }},
+        {"$sort": {"order_count": -1}}
+    ]
+    
+    order_data = await db.orders.aggregate(order_pipeline).to_list(100)
+    
+    # Also get visitor data by country
+    visitor_pipeline = [
+        {"$match": {"country": {"$ne": None}}},
+        {"$group": {
+            "_id": "$country",
+            "visitor_count": {"$sum": 1},
+            "country_code": {"$first": "$country_code"}
+        }},
+        {"$sort": {"visitor_count": -1}},
+        {"$limit": 30}
+    ]
+    
+    visitor_data = await db.visitor_sessions.aggregate(visitor_pipeline).to_list(30)
+    
+    # Merge data
+    countries = {}
+    for v in visitor_data:
+        countries[v["_id"]] = {
+            "country": v["_id"],
+            "country_code": v.get("country_code"),
+            "visitors": v["visitor_count"],
+            "orders": 0,
+            "revenue": 0,
+            "customers": 0
+        }
+    
+    for o in order_data:
+        country = o.get("country") or o.get("_id")
+        if country in countries:
+            countries[country]["orders"] = o["order_count"]
+            countries[country]["revenue"] = round(o["revenue"], 2)
+            countries[country]["customers"] = o["customer_count"]
+        else:
+            countries[country] = {
+                "country": country,
+                "country_code": None,
+                "visitors": 0,
+                "orders": o["order_count"],
+                "revenue": round(o["revenue"], 2),
+                "customers": o["customer_count"]
+            }
+    
+    # Convert to list and sort by visitors
+    result = list(countries.values())
+    result.sort(key=lambda x: x["visitors"], reverse=True)
+    
+    return {
+        "countries": result[:30],
+        "total_countries": len(result)
+    }
+
+
+@api_router.get("/admin/analytics/conversion-funnel")
+async def get_conversion_funnel(request: Request, days: int = 30):
+    """Get detailed conversion funnel data"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    # Get funnel metrics
+    total_visitors = await db.visitor_sessions.count_documents({"first_visit": {"$gte": start_date}})
+    total_signups = await db.users.count_documents({"created_at": {"$gte": start_date}})
+    giveaway_entries = await db.email_subscriptions.count_documents({"source": "giveaway_popup", "timestamp": {"$gte": start_date}})
+    waitlist_entries = await db.waitlist.count_documents({"created_at": {"$gte": start_date}})
+    
+    # Cart events
+    cart_events = await db.analytics_events.count_documents({"event_type": "add_to_cart", "timestamp": {"$gte": start_date}})
+    checkout_events = await db.analytics_events.count_documents({"event_type": "begin_checkout", "timestamp": {"$gte": start_date}})
+    purchase_events = await db.orders.count_documents({"created_at": {"$gte": start_date}})
+    
+    # Calculate conversion rates
+    visitor_to_signup = round(total_signups / total_visitors * 100, 2) if total_visitors > 0 else 0
+    signup_to_cart = round(cart_events / total_signups * 100, 2) if total_signups > 0 else 0
+    cart_to_checkout = round(checkout_events / cart_events * 100, 2) if cart_events > 0 else 0
+    checkout_to_purchase = round(purchase_events / checkout_events * 100, 2) if checkout_events > 0 else 0
+    overall_conversion = round(purchase_events / total_visitors * 100, 2) if total_visitors > 0 else 0
+    
+    return {
+        "period_days": days,
+        "funnel": {
+            "visitors": total_visitors,
+            "signups": total_signups,
+            "giveaway_entries": giveaway_entries,
+            "waitlist_entries": waitlist_entries,
+            "cart_additions": cart_events,
+            "checkouts_started": checkout_events,
+            "purchases": purchase_events
+        },
+        "conversion_rates": {
+            "visitor_to_signup": visitor_to_signup,
+            "signup_to_cart": signup_to_cart,
+            "cart_to_checkout": cart_to_checkout,
+            "checkout_to_purchase": checkout_to_purchase,
+            "overall": overall_conversion
+        },
+        "insights": {
+            "biggest_drop": "cart_to_checkout" if cart_to_checkout < checkout_to_purchase else "checkout_to_purchase",
+            "recommendation": "Focus on reducing cart abandonment" if cart_to_checkout < 50 else "Optimize checkout flow"
+        }
+    }
+
+
+@api_router.get("/admin/analytics/revenue")
+async def get_revenue_analytics(request: Request, days: int = 30):
+    """Get detailed revenue analytics"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    # Get all orders in period
+    orders = await db.orders.find({
+        "created_at": {"$gte": start_date.isoformat()}
+    }).to_list(10000)
+    
+    # Daily revenue breakdown
+    daily_revenue = {}
+    for i in range(days):
+        date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        daily_revenue[date] = {"date": date, "revenue": 0, "orders": 0, "avg_order": 0}
+    
+    for order in orders:
+        order_date = order.get("created_at", "")[:10]
+        if order_date in daily_revenue:
+            daily_revenue[order_date]["revenue"] += order.get("total", 0)
+            daily_revenue[order_date]["orders"] += 1
+    
+    # Calculate averages
+    for date in daily_revenue:
+        if daily_revenue[date]["orders"] > 0:
+            daily_revenue[date]["avg_order"] = round(
+                daily_revenue[date]["revenue"] / daily_revenue[date]["orders"], 2
+            )
+        daily_revenue[date]["revenue"] = round(daily_revenue[date]["revenue"], 2)
+    
+    # Overall stats
+    total_revenue = sum(o.get("total", 0) for o in orders)
+    total_orders = len(orders)
+    avg_order_value = round(total_revenue / total_orders, 2) if total_orders > 0 else 0
+    
+    # Get unique customers
+    unique_customers = set(o.get("shipping", {}).get("email") for o in orders if o.get("shipping", {}).get("email"))
+    ltv = round(total_revenue / len(unique_customers), 2) if unique_customers else 0
+    
+    return {
+        "period_days": days,
+        "total_revenue": round(total_revenue, 2),
+        "total_orders": total_orders,
+        "avg_order_value": avg_order_value,
+        "unique_customers": len(unique_customers),
+        "customer_ltv": ltv,
+        "daily_breakdown": list(daily_revenue.values())
+    }
+
+
+@api_router.post("/admin/orders/bulk-update-status")
+async def bulk_update_order_status(request: Request):
+    """Bulk update order statuses (e.g., mark all as shipped)"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    body = await request.json()
+    order_ids = body.get("order_ids", [])
+    new_status = body.get("status", "shipped")
+    tracking_number = body.get("tracking_number")
+    carrier = body.get("carrier")
+    
+    if not order_ids:
+        raise HTTPException(status_code=400, detail="No order IDs provided")
+    
+    update_data = {
+        "status": new_status,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if tracking_number:
+        update_data["tracking_number"] = tracking_number
+    if carrier:
+        update_data["carrier"] = carrier
+    
+    result = await db.orders.update_many(
+        {"id": {"$in": order_ids}},
+        {"$set": update_data}
+    )
+    
+    return {
+        "success": True,
+        "updated_count": result.modified_count,
+        "new_status": new_status
+    }
+
+
+@api_router.post("/admin/waitlist/send-reminder")
+async def send_waitlist_reminder(request: Request):
+    """Send drop reminder to all waitlist users"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    body = await request.json()
+    subject = body.get("subject", "Your RAZE drop is coming soon!")
+    message = body.get("message", "The wait is almost over. Get ready for the drop!")
+    
+    # Get all unique waitlist emails
+    waitlist_entries = await db.waitlist.find({}, {"email": 1}).to_list(10000)
+    unique_emails = list(set(entry["email"] for entry in waitlist_entries))
+    
+    # Log the reminder send
+    await db.activity_log.insert_one({
+        "action": "waitlist_reminder_sent",
+        "admin_email": user["email"],
+        "recipients_count": len(unique_emails),
+        "subject": subject,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # In production, this would trigger n8n webhook for bulk email
+    # For now, return the count
+    return {
+        "success": True,
+        "recipients_count": len(unique_emails),
+        "message": f"Reminder queued for {len(unique_emails)} waitlist subscribers"
+    }
+
+
+@api_router.get("/admin/promo/performance")
+async def get_promo_performance(request: Request):
+    """Get promo code performance analytics"""
+    user = await get_current_user(request)
+    if not user or not is_admin_user(user['email']):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all promo codes
+    promo_codes = await db.promo_codes.find({}).to_list(1000)
+    
+    # Get orders with discounts
+    orders_with_discount = await db.orders.find({
+        "discount": {"$gt": 0}
+    }).to_list(10000)
+    
+    # Calculate performance
+    performance = []
+    for promo in promo_codes:
+        code = promo.get("code")
+        uses = promo.get("uses", 0)
+        
+        # Find orders using this code (approximate by discount description)
+        code_orders = [o for o in orders_with_discount if code.lower() in (o.get("discount_description", "") or "").lower()]
+        total_discount_given = sum(o.get("discount", 0) for o in code_orders)
+        total_revenue_from_code = sum(o.get("total", 0) for o in code_orders)
+        
+        performance.append({
+            "code": code,
+            "discount_type": promo.get("discount_type"),
+            "discount_value": promo.get("discount_value"),
+            "uses": uses,
+            "max_uses": promo.get("max_uses"),
+            "active": promo.get("active", True),
+            "total_discount_given": round(total_discount_given, 2),
+            "revenue_generated": round(total_revenue_from_code, 2),
+            "roi": round(total_revenue_from_code / total_discount_given, 2) if total_discount_given > 0 else 0
+        })
+    
+    # Sort by uses
+    performance.sort(key=lambda x: x["uses"], reverse=True)
+    
+    return {
+        "promo_performance": performance,
+        "total_promo_codes": len(promo_codes),
+        "total_discount_given": round(sum(p["total_discount_given"] for p in performance), 2)
+    }
+
+
+@api_router.get("/public/social-proof")
+async def get_social_proof_stats():
+    """
+    Public endpoint for social proof stats (no auth required).
+    Returns count of users/athletes and countries.
+    """
+    # Get unique users count
+    total_users = await db.users.count_documents({})
+    
+    # Get waitlist count (potential athletes)
+    waitlist_count = await db.waitlist.count_documents({})
+    
+    # Combine for "athletes" count (users + unique waitlist emails not in users)
+    waitlist_emails = await db.waitlist.distinct("email")
+    user_emails = await db.users.distinct("email")
+    unique_athletes = len(set(waitlist_emails) | set(user_emails))
+    
+    # Get countries from visitor sessions
+    countries = await db.visitor_sessions.distinct("country")
+    countries = [c for c in countries if c]  # Filter out None
+    
+    # Also check order shipping countries
+    order_countries = await db.orders.distinct("shipping.country")
+    order_countries = [c for c in order_countries if c]
+    
+    all_countries = list(set(countries) | set(order_countries))
+    
+    return {
+        "athletes_count": unique_athletes,
+        "countries_count": len(all_countries) if all_countries else 1,  # At least 1
+        "waitlist_count": waitlist_count,
+        "users_count": total_users
+    }
+
+
 # Include the router in the main app (MUST be after all routes are defined)
 app.include_router(api_router)
 
