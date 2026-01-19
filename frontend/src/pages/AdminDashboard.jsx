@@ -32,7 +32,17 @@ import {
   Shuffle,
   FileText,
   CheckSquare,
-  Square
+  Square,
+  AlertTriangle,
+  Globe,
+  Star,
+  Crown,
+  Zap,
+  Bell,
+  Truck,
+  MapPin,
+  Percent,
+  Award
 } from 'lucide-react';
 import {
   AreaChart,
