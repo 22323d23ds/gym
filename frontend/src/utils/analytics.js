@@ -150,22 +150,9 @@ export const getVisitorInfo = () => {
       platform: navigator.platform,
     };
 
-    // Try to get geolocation (requires user permission)
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          info.latitude = position.coords.latitude;
-          info.longitude = position.coords.longitude;
-          resolve(info);
-        },
-        () => {
-          // If permission denied, use IP-based geolocation via backend
-          resolve(info);
-        }
-      );
-    } else {
-      resolve(info);
-    }
+    // Skip browser geolocation - use IP-based detection on backend instead
+    // This avoids the intrusive permission popup
+    resolve(info);
   });
 };
 
